@@ -47,6 +47,11 @@ copy .env.example .env
 Edita `.env` y cambia todas las contraseñas (`POSTGRES_PASSWORD`, `MQTT_PASSWORD`,
 `DJANGO_SUPERUSER_PASSWORD`, `DJANGO_SECRET_KEY`).
 
+> Las URLs de esta guía asumen el puerto por defecto (`8000`). Si cambiaste
+> `WEB_HOST_PORT` en tu `.env` (por ejemplo para evitar un choque con otro
+> proyecto que ya usa el 8000 en tu máquina), sustituye el puerto en todas las
+> URLs siguientes por el que hayas configurado.
+
 ### 2. Generar el archivo de contraseñas de Mosquitto
 
 Este paso se hace **una sola vez** (el archivo `mosquitto/config/passwd` no se
