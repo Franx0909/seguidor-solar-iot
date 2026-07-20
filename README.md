@@ -345,6 +345,76 @@ esto a un servidor Linux es: copiar el repo, copiar/regenerar `.env` y
 `mosquitto/config/passwd` con credenciales nuevas para ese entorno, y correr
 `docker compose up --build -d`.
 
+## Despliegue en Railway (producción)
+
+La app corre en 4 servicios independientes dentro de un mismo proyecto de
+Railway (railway.app), todos conectados al mismo repo de GitHub con
+auto-deploy en cada push a `main`.
+
+### 1. Crear el proyecto
+
+1. Crea una cuenta en [railway.app](https://railway.app) (login con GitHub).
+2. **New Project → Deploy from GitHub repo** → selecciona `urbanatika/ecs-iot`.
+   Railway crea el primer servicio; los siguientes se agregan con
+   **+ New → GitHub Repo** (mismo repo, distinto Root Directory) dentro del
+   mismo proyecto para que compartan red interna.
+
+### 2. Base de datos
+
+**+ New → Database → PostgreSQL** (plugin administrado de Railway). Railway
+expone las variables `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`
+automáticamente — mapéalas a las que usa `settings.py` en cada servicio que
+las necesite (`POSTGRES_HOST=${{Postgres.PGHOST}}`, etc., usando referencias
+de variables de Railway).
+
+### 3. Servicio `web`
+
+- **Root Directory:** `backend`
+- Build: detecta el `Dockerfile` automáticamente.
+- **Variables** (Settings → Variables): todas las de `.env.example` excepto
+  `WEB_HOST_PORT`/`MOSQUITTO_HOST_PORT` (esos son solo para docker-compose
+  local). Railway inyecta `PORT` solo — el `Dockerfile` ya escucha en
+  `${PORT:-8000}` y corre `migrate` automáticamente antes de `gunicorn`.
+- Agrega además:
+  - `DJANGO_ALLOWED_HOSTS=<tu-dominio>.up.railway.app`
+  - `DJANGO_CSRF_TRUSTED_ORIGINS=https://<tu-dominio>.up.railway.app`
+- **Settings → Networking → Generate Domain** para obtener la URL pública.
+
+### 4. Servicio `mqtt_listener`
+
+Mismo repo, **Root Directory:** `backend`, mismas variables que `web` (usa
+Postgres y Mosquitto). En **Settings → Deploy → Custom Start Command**:
+`python manage.py run_mqtt_listener`.
+
+### 5. Servicio `mosquitto`
+
+- **Root Directory:** `mosquitto` (usa el `Dockerfile` nuevo — genera el
+  `passwd` desde variables de entorno en cada arranque, no necesita el bind
+  mount que usa docker-compose local).
+- **Variables:** `MQTT_USERNAME`, `MQTT_PASSWORD` (los mismos valores que en
+  `web`/`mqtt_listener`).
+- **Settings → Networking → TCP Proxy** → expón el puerto `1883`. Railway te
+  da un host:puerto público (ej. `roundhouse.proxy.rlwy.net:12345`) — ese es
+  el endpoint al que deben apuntar los sensores/dispositivos reales para
+  publicar por MQTT desde internet.
+- En `web`/`mqtt_listener`, `MQTT_BROKER_HOST`/`MQTT_BROKER_PORT` deben
+  apuntar al **host interno** de Railway (`mosquitto.railway.internal`,
+  puerto `1883`), no al proxy TCP público — la comunicación entre servicios
+  del mismo proyecto va por red privada.
+
+### 6. `simulator`
+
+No lo despliegues en producción — solo genera datos falsos y ensuciaría las
+lecturas reales. Es solo para desarrollo local vía docker-compose.
+
+### 7. Primer superusuario
+
+El primer deploy de `web` corre `migrate` pero no crea el superusuario (eso
+lo hacía el servicio `migrate` de docker-compose, que no existe en Railway).
+Créalo una vez desde la pestaña **Shell/Console** de Railway en el servicio
+`web`, o desde tu máquina con `railway run python manage.py createsuperuser`
+tras `railway link` al proyecto.
+
 ## Posibles mejoras futuras
 
 - **Tiempo real vía WebSocket:** si se necesita latencia sub-segundo o muchos
