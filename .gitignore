@@ -1,6 +1,7 @@
 # Environment / secrets
 .env
 mosquitto/config/passwd
+firmware/**/config.h
 
 # Python
 __pycache__/
