@@ -4,7 +4,7 @@
 {% block content %}
 <div class="page-header">
   <h1>Dashboard</h1>
-  <a class="btn" href="{% url 'monitoring:device-create' %}">+ Agregar sensor</a>
+  <a class="btn" href="{% url 'monitoring:device-create' %}">+ Agregar dispositivo</a>
 </div>
 
 {{ seed_data|json_script:"seed-data" }}

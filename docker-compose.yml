@@ -56,6 +56,16 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend
+          target: /app
+          ignore:
+            - "**/__pycache__/"
+            - "**/*.pyc"
+        - action: rebuild
+          path: ./backend/requirements.txt
 
   mqtt_listener:
     build: ./backend
@@ -72,6 +82,16 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend
+          target: /app
+          ignore:
+            - "**/__pycache__/"
+            - "**/*.pyc"
+        - action: rebuild
+          path: ./backend/requirements.txt
 
   simulator:
     build: ./simulator

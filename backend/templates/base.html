@@ -27,14 +27,21 @@
                 <a href="{% url 'monitoring:product-list' %}">Productos</a>
                 <a href="{% url 'monitoring:device-list' %}">Dispositivos</a>
                 <a href="{% url 'monitoring:devices-map' %}">Mapa</a>
-                <a href="{% url 'monitoring:profile-branding-edit' %}">Mi proyecto</a>
-                {% if user_is_admin_or_global %}
-                    <a href="{% url 'monitoring:user-list' %}">Usuarios</a>
-                {% endif %}
-                {% if user_role == "global" %}
-                    <a href="{% url 'monitoring:site-branding-edit' %}">Marca del sitio</a>
-                    <a href="{% url 'monitoring:product-type-list' %}">Tipos de producto</a>
-                    <a href="{% url 'monitoring:platform-overview' %}">Panorama</a>
+                <a href="{% url 'monitoring:profile-branding-edit' %}">Personalización</a>
+                {% if user_is_admin_or_global or user_role == "global" %}
+                    <details class="nav-dropdown">
+                        <summary>Configuración</summary>
+                        <div class="nav-dropdown-menu">
+                            {% if user_is_admin_or_global %}
+                                <a href="{% url 'monitoring:user-list' %}">Usuarios</a>
+                            {% endif %}
+                            {% if user_role == "global" %}
+                                <a href="{% url 'monitoring:site-branding-edit' %}">Marca del sitio</a>
+                                <a href="{% url 'monitoring:product-type-list' %}">Tipos de producto</a>
+                                <a href="{% url 'monitoring:platform-overview' %}">Panorama</a>
+                            {% endif %}
+                        </div>
+                    </details>
                 {% endif %}
                 <span class="user">{{ user.username }}</span>
                 <a href="/admin/">Admin</a>

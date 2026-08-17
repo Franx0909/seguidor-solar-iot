@@ -16,6 +16,10 @@ DEFAULT_UNITS = {
     "resistencia_tierra": "Ω",
     "voltaje": "V",
     "continuidad": "Ω",
+    "temperatura": "°C",
+    "humedad": "%",
+    "presion": "hPa",
+    "gas": "kΩ",
 }
 
 
@@ -105,11 +109,17 @@ def _handle_message(topic, payload):
     elif timezone.is_naive(ts):
         ts = timezone.make_aware(ts, timezone.utc)
 
-    sensor, _ = Sensor.objects.get_or_create(
+    sensor, created = Sensor.objects.get_or_create(
         device=device,
         variable=variable,
         defaults={"unit": DEFAULT_UNITS.get(variable, "")},
     )
+
+    if not created and not sensor.unit:
+        default_unit = DEFAULT_UNITS.get(variable)
+        if default_unit:
+            sensor.unit = default_unit
+            sensor.save(update_fields=["unit"])
 
     SensorReading.objects.create(sensor=sensor, value=float(value), timestamp=ts)
     Device.objects.filter(pk=device.pk).update(last_seen_at=timezone.now())

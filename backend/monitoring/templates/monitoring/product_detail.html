@@ -59,14 +59,14 @@
   </table>
 </div>
 {% else %}
-<p class="empty-state">Este producto todavía no tiene un dispositivo/sensor.</p>
+<p class="empty-state">Este producto todavía no tiene un dispositivo.</p>
 {% endif %}
-<p><a class="btn-secondary" href="{% url 'monitoring:product-device-create' product.pk %}">+ Agregar sensor a este producto</a></p>
+<p><a class="btn-secondary" href="{% url 'monitoring:product-device-create' product.pk %}">+ Agregar dispositivo a este producto</a></p>
 
 {% if not devices %}
 <h2>Datos a mano</h2>
 <p class="hint">
-  Como este producto no tiene un sensor, registra aquí el estado a mano
+  Como este producto no tiene un dispositivo, registra aquí el estado a mano
   (ej. "medición trimestral con telurómetro: 4.2 Ω, dentro de norma").
 </p>
 
