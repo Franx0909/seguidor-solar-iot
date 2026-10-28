@@ -28,3 +28,21 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Credenciales y configuraciones privadas
+.env
+.env.*
+!.env.example
+
+# Mosquitto: usuarios y contraseñas
+mosquitto/config/passwd
+mosquitto/config/passwd.*
+mosquitto/config/*.key
+
+# Archivos temporales de pruebas
+probar_esp32.py
+run_mqtt_listener.py
+
+# Archivos locales de Arduino
+secrets.h
+credentials.h

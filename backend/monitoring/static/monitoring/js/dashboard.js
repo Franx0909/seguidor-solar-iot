@@ -1,247 +1,47 @@
-(function () {
-  const MAX_POINTS = 50;
-  const ONLINE_THRESHOLD_SECONDS = 15;
-  const POLL_INTERVAL_MS = 2500;
-  const VALUE_TOLERANCE = 0.001;
-
-  const root = document.getElementById("dashboard-root");
+(() => {
+  'use strict';
+  const root = document.getElementById('dashboard-root');
   if (!root) return;
-
-  const apiUrl = root.dataset.apiUrl;
-  const commandUrlTemplate = root.dataset.commandUrlTemplate || "";
-  const seedDataEl = document.getElementById("seed-data");
-  const seedData = seedDataEl ? JSON.parse(seedDataEl.textContent) : {};
-
-  function cssVar(name) {
-    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  }
-
-  function hexToRgba(hex, alpha) {
-    const clean = hex.replace("#", "");
-    const bigint = parseInt(clean, 16);
-    const r = (bigint >> 16) & 255;
-    const g = (bigint >> 8) & 255;
-    const b = bigint & 255;
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-  }
-
-  function formatTime(iso) {
-    const d = new Date(iso);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  }
-
-  function getCookie(name) {
-    const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
-    return match ? decodeURIComponent(match[2]) : null;
-  }
-
-  function commandUrl(sensorId) {
-    return commandUrlTemplate.replace(/\/0\/command\//, `/${sensorId}/command/`);
-  }
-
-  async function postCommand(sensorId, value) {
-    try {
-      const res = await fetch(commandUrl(sensorId), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRFToken": getCookie("csrftoken"),
-        },
-        body: JSON.stringify({ value: value }),
-      });
-      return res.ok;
-    } catch (err) {
-      console.error("Command failed", err);
-      return false;
-    }
-  }
-
-  function createChart(canvas, seedPoints) {
-    const seriesColor = cssVar("--series-1");
-    const grid = cssVar("--gridline");
-    const muted = cssVar("--text-muted");
-    const surface = cssVar("--surface-1");
-
-    return new Chart(canvas, {
-      type: "line",
-      data: {
-        labels: seedPoints.map((p) => formatTime(p.t)),
-        datasets: [
-          {
-            data: seedPoints.map((p) => p.v),
-            borderColor: seriesColor,
-            backgroundColor: hexToRgba(seriesColor, 0.1),
-            fill: true,
-            borderWidth: 2,
-            borderCapStyle: "round",
-            borderJoinStyle: "round",
-            pointRadius: 0,
-            pointHoverRadius: 4,
-            pointHoverBackgroundColor: seriesColor,
-            pointHoverBorderColor: surface,
-            pointHoverBorderWidth: 2,
-            tension: 0.3,
-            cubicInterpolationMode: "monotone",
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        interaction: { mode: "nearest", intersect: false },
-        plugins: {
-          legend: { display: false },
-          tooltip: { displayColors: false },
-        },
-        scales: {
-          x: { display: false, grid: { display: false } },
-          y: {
-            grid: { color: grid },
-            ticks: { color: muted, maxTicksLimit: 4 },
-          },
-        },
-      },
-    });
-  }
-
-  const charts = {};
-  const lastTimestamps = {};
-  const pendingCommands = {}; // sensorId -> value we told the device to reach, cleared once confirmed
-
-  document.querySelectorAll(".sensor-card").forEach((card) => {
-    const sensorId = card.dataset.sensorId;
-    const widgetType = card.dataset.widgetType;
-
-    if (widgetType === "line_chart") {
-      const canvas = card.querySelector('[data-role="chart"]');
-      const seed = seedData[sensorId] || [];
-      charts[sensorId] = createChart(canvas, seed);
-      if (seed.length) {
-        lastTimestamps[sensorId] = seed[seed.length - 1].t;
-      }
-    }
-
-    if (widgetType === "button") {
-      const btn = card.querySelector('[data-role="gadget-button"]');
-      btn.addEventListener("click", async () => {
-        const onValue = parseFloat(btn.dataset.onValue);
-        const offValue = parseFloat(btn.dataset.offValue);
-        const isLit = btn.classList.contains("lit");
-        const target = isLit ? offValue : onValue;
-        btn.classList.add("pending");
-        pendingCommands[sensorId] = target;
-        await postCommand(sensorId, target);
-      });
-    }
-
-    if (widgetType === "slider") {
-      const slider = card.querySelector('[data-role="gadget-slider"]');
-      slider.addEventListener("change", async () => {
-        pendingCommands[sensorId] = parseFloat(slider.value);
-        await postCommand(sensorId, parseFloat(slider.value));
-      });
-    }
-  });
-
-  function isSliderBeingDragged(slider) {
-    return document.activeElement === slider;
-  }
-
-  async function poll() {
-    try {
-      const res = await fetch(apiUrl, { headers: { "X-Requested-With": "XMLHttpRequest" } });
-      if (!res.ok) return;
-      const data = await res.json();
-      const serverNow = new Date(data.server_time).getTime();
-
-      data.sensors.forEach((s) => {
-        if (s.value === null) return;
-        const card = document.querySelector(`.sensor-card[data-sensor-id="${s.id}"]`);
-        if (!card) return;
-        const widgetType = card.dataset.widgetType;
-
-        const valueEl = card.querySelector('[data-role="latest-value"]');
-        if (valueEl) valueEl.textContent = `${s.value} ${s.unit || ""}`.trim();
-
-        if (widgetType === "line_chart") {
-          const chart = charts[s.id];
-          if (!chart || lastTimestamps[s.id] === s.timestamp) return;
-          lastTimestamps[s.id] = s.timestamp;
-          chart.data.labels.push(formatTime(s.timestamp));
-          chart.data.datasets[0].data.push(s.value);
-          if (chart.data.datasets[0].data.length > MAX_POINTS) {
-            chart.data.labels.shift();
-            chart.data.datasets[0].data.shift();
-          }
-          chart.update("none");
-        }
-
-        if (widgetType === "meter") {
-          const fill = card.querySelector('[data-role="meter-fill"]');
-          const min = parseFloat(fill.dataset.min);
-          const max = parseFloat(fill.dataset.max);
-          const pct = Math.max(0, Math.min(100, ((s.value - min) / (max - min)) * 100));
-          fill.style.width = `${pct}%`;
-        }
-
-        if (widgetType === "led") {
-          const dot = card.querySelector('[data-role="led-dot"]');
-          const threshold = parseFloat(dot.dataset.threshold);
-          dot.classList.toggle("lit", s.value >= threshold);
-        }
-
-        if (widgetType === "button") {
-          const btn = card.querySelector('[data-role="gadget-button"]');
-          const onValue = parseFloat(btn.dataset.onValue);
-          const isOn = Math.abs(s.value - onValue) < VALUE_TOLERANCE;
-          btn.textContent = isOn ? "Encendido" : "Apagado";
-          btn.classList.toggle("lit", isOn);
-
-          const pending = pendingCommands[s.id];
-          if (pending !== undefined && Math.abs(s.value - pending) < VALUE_TOLERANCE) {
-            delete pendingCommands[s.id];
-            btn.classList.remove("pending");
-          }
-        }
-
-        if (widgetType === "slider") {
-          const slider = card.querySelector('[data-role="gadget-slider"]');
-          if (!isSliderBeingDragged(slider)) {
-            slider.value = s.value;
-          }
-          const pending = pendingCommands[s.id];
-          if (pending !== undefined && Math.abs(s.value - pending) < VALUE_TOLERANCE) {
-            delete pendingCommands[s.id];
-          }
-        }
-      });
-
-      data.devices.forEach((dev) => {
-        const card = document.querySelector(`.device-card[data-device-id="${dev.id}"]`);
-        if (!card) return;
-        const badge = card.querySelector('[data-role="status-badge"]');
-        if (!badge) return;
-
-        if (!dev.last_seen_at) {
-          badge.textContent = "sin datos";
-          badge.className = "badge";
-          return;
-        }
-        const ageSeconds = (serverNow - new Date(dev.last_seen_at).getTime()) / 1000;
-        if (ageSeconds <= ONLINE_THRESHOLD_SECONDS) {
-          badge.textContent = "en línea";
-          badge.className = "badge online";
-        } else {
-          badge.textContent = "sin señal";
-          badge.className = "badge offline";
-        }
-      });
-    } catch (err) {
-      console.error("Polling failed", err);
-    }
-  }
-
-  poll();
-  setInterval(poll, POLL_INTERVAL_MS);
+  const $ = id => document.getElementById(id);
+  const API = root.dataset.apiUrl;
+  const seed = JSON.parse($('seed-data')?.textContent || '{}');
+  const registry = [...document.querySelectorAll('#solar-sensor-registry [data-sensor-id]')].map(el => ({id: Number(el.dataset.sensorId), key: norm(el.dataset.variable), slug: el.dataset.deviceSlug, control: el.dataset.isControl === '1', min: Number(el.dataset.min), max: Number(el.dataset.max)}));
+  const aliases = {light_left:['light_left','left','ldr_left','ldr_izquierda'],light_right:['light_right','right','ldr_right','ldr_derecha'],light_up:['light_up','up','ldr_up','ldr_arriba'],light_down:['light_down','down','ldr_down','ldr_abajo'],solar_azimuth:['solar_azimuth','sun_azimuth','solarazimuth'],solar_elevation:['solar_elevation','solar_altitude','elevation'],solar_zenith:['solar_zenith','sun_zenith'],azimuth:['azimuth','servo_horizontal','servo_azimuth'],zenith:['zenith','servo_vertical','servo_zenith'],mode:['mode','auto_manual','automatic_mode'],servo:['servo','servo1','servo_horizontal_set'],servo2:['servo2','servo_vertical_set']};
+  function norm(x){return String(x||'').toLowerCase().trim().replace(/[\s/.-]+/g,'_')}
+  function find(key, control=false){return registry.find(r => (aliases[key]||[key]).includes(r.key) && (!control || r.control));}
+  const values = {};
+  const timestamps = {};
+  const chartKeys = ['light_left','light_right','light_up','light_down'];
+  const labels = ['Izquierda','Derecha','Arriba','Abajo'];
+  const colors = ['#ee86a7','#6aa9e8','#55ba9b','#e6ad52'];
+  const points = {};
+  function localTime(t){return new Date(t).toLocaleTimeString('es-CL',{timeZone:'America/Santiago',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})}
+  for (const key of chartKeys){const sensor=find(key);points[key] = sensor ? (seed[sensor.id]||[]).filter(p=>Number.isFinite(Number(p.v))&&Number.isFinite(new Date(p.t).getTime())).map(p=>({x:new Date(p.t).getTime(),y:Number(p.v)})) : [];}
+  let chart=null;
+  if (typeof Chart !== 'undefined') {
+    chart = new Chart($('solar-ldr-chart'), {type:'line',data:{datasets:chartKeys.map((key,i)=>({label:labels[i],data:points[key],borderColor:colors[i],backgroundColor:colors[i],pointRadius:0,pointHoverRadius:4,borderWidth:2,tension:.25,fill:false,parsing:false,hidden:false}))},options:{responsive:true,maintainAspectRatio:false,animation:false,interaction:{mode:'nearest',intersect:false},plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>items.length?localTime(items[0].parsed.x):''}}},scales:{x:{type:'linear',ticks:{maxTicksLimit:6,callback:v=>localTime(v)},grid:{color:'rgba(128,128,128,.12)'},title:{display:true,text:'Hora (Santiago)'}},y:{beginAtZero:true,title:{display:true,text:'Lectura LDR'},grid:{color:'rgba(128,128,128,.12)'}}}}});
+  } else {$('solar-ldr-message').textContent='Chart.js no está cargado. Revisa la plantilla base para habilitar la gráfica.';}
+  document.querySelectorAll('[data-ldr-filter]').forEach(input=>input.addEventListener('change',()=>{if(!chart)return;const i=chartKeys.indexOf(input.dataset.ldrFilter);chart.setDatasetVisibility(i,input.checked);chart.update();}));
+  function drawLdr(){if(chart) {for(let i=0;i<4;i++) chart.data.datasets[i].data=points[chartKeys[i]];chart.update('none');} const found=chartKeys.filter(k=>find(k));$('solar-light-state').textContent=found.length+'/4 sensores';$('solar-ldr-message').textContent=found.length?'Historial de hasta 50 muestras por sensor; nuevas lecturas en vivo.':'No se encontraron sensores LDR registrados.';$('solar-ldr-latest').innerHTML=chartKeys.map((k,i)=>`<div>${labels[i]}<strong>${Number.isFinite(values[k])?values[k].toFixed(0):'--'}</strong></div>`).join('');}
+  // Globe is rendered in 3D with CSS transforms and perspective; the sun's
+  // screen position is a projection of the 3D solar direction vector.
+  let yaw=0.45,pitch=-0.25,az=null,el=null;
+  const scene=$('solar-scene'),sphere=$('solar-sphere'),sun=$('solar-sun');
+  function globe(){sphere.style.transform=`rotateX(${pitch}rad) rotateY(${yaw}rad)`;if(az===null||el===null){sun.hidden=true;return;}sun.hidden=false;const a=az*Math.PI/180,e=el*Math.PI/180;let x=Math.cos(e)*Math.sin(a),y=-Math.sin(e),z=Math.cos(e)*Math.cos(a);const xx=x*Math.cos(yaw)+z*Math.sin(yaw),zz=-x*Math.sin(yaw)+z*Math.cos(yaw);const yy=y*Math.cos(pitch)-zz*Math.sin(pitch),depth=y*Math.sin(pitch)+zz*Math.cos(pitch);const size=Math.min(scene.clientWidth,400);const radius=Math.min(125,size*.32);sun.style.left=`calc(50% + ${xx*radius}px)`;sun.style.top=`calc(50% + ${yy*radius}px)`;sun.style.opacity=depth<-.08?'.45':'1';sun.style.transform=`translate(-50%,-50%) scale(${depth<-.08?.75:1})`;}
+  let drag=null;scene.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,yaw,pitch};scene.setPointerCapture(e.pointerId)});scene.addEventListener('pointermove',e=>{if(!drag)return;yaw=drag.yaw+(e.clientX-drag.x)*.009;pitch=Math.max(-1.2,Math.min(1.2,drag.pitch+(e.clientY-drag.y)*.009));globe()});scene.addEventListener('pointerup',()=>drag=null);scene.addEventListener('pointercancel',()=>drag=null);window.addEventListener('resize',globe);globe();
+  const fmt=v=>Number.isFinite(v)?v.toFixed(1)+'°':'--°';
+  function renderPosition(){az=Number.isFinite(values.solar_azimuth)?values.solar_azimuth:null;el=Number.isFinite(values.solar_elevation)?values.solar_elevation:(Number.isFinite(values.solar_zenith)?90-values.solar_zenith:null);$('solar-azimuth').textContent=fmt(az);$('solar-elevation').textContent=fmt(el);$('solar-zenith-label').textContent='Cenit: '+fmt(Number.isFinite(values.solar_zenith)?values.solar_zenith:(el===null?null:90-el));$('solar-position-state').textContent=az!==null&&el!==null?'Posición recibida':'Faltan variables solares';$('solar-auto-azimuth').textContent=fmt(az);$('solar-auto-elevation').textContent=fmt(el);$('solar-auto-servo-h').textContent=fmt(values.azimuth);$('solar-auto-servo-v').textContent=fmt(values.zenith);globe();}
+  function updateClock(){const d=new Date();$('solar-local-date').textContent=new Intl.DateTimeFormat('es-CL',{timeZone:'America/Santiago',day:'2-digit',month:'2-digit',year:'numeric'}).format(d);$('solar-local-time').textContent=new Intl.DateTimeFormat('es-CL',{timeZone:'America/Santiago',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(d)}updateClock();setInterval(updateClock,1000);
+  const slugs={esp32:['seguidor-solar-iot','esp32'],plc:['plc'],raspberry:['raspberry','raspberry-pi','rpi']};
+  function statuses(devices,serverTime){for(const [type,keys] of Object.entries(slugs)){const item=document.querySelector(`[data-solar-device="${type}"]`),label=item?.querySelector('[data-solar-status-label]');if(!item)return;item.classList.remove('solar-connected','solar-disconnected');const matches=devices.filter(d=>keys.includes(String(d.slug).toLowerCase()));if(!matches.length){label.textContent='No configurado';continue;}const recent=matches.some(d=>d.last_seen_at&&Math.abs(serverTime-new Date(d.last_seen_at).getTime())<=15000);item.classList.add(recent?'solar-connected':'solar-disconnected');label.textContent=recent?'Datos recientes':'Sin señal reciente';}}
+  let currentMode=null;
+  function modeValue(v){if(v===null||v===undefined)return null;if(typeof v==='number')return v===1?'automatic':v===0?'manual':null;const s=String(v).toLowerCase();return ['1','auto','automatic','automatico'].includes(s)?'automatic':['0','manual'].includes(s)?'manual':null;}
+  function setMode(mode){currentMode=mode;$('solar-manual-panel').hidden=mode!=='manual';$('solar-automatic-panel').hidden=mode!=='automatic';$('solar-mode-unavailable').hidden=mode!==null;document.querySelectorAll('[data-mode-choice]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.modeChoice===mode)));const modeSensor=find('mode',true);$('solar-mode-message').textContent=mode===null?'Modo no recibido. El cambio de modo requiere un sensor de control configurado.':`Modo reportado: ${mode==='manual'?'manual':'automático'}. ${modeSensor?'Puedes solicitar un cambio desde los botones.':'Cambio de modo no configurado en Django.'}`;document.querySelectorAll('[data-mode-choice]').forEach(b=>b.disabled=!modeSensor);for(const [id,key] of [['solar-servo-horizontal','servo'],['solar-servo-vertical','servo2']]){const s=find(key,true),input=$(id);input.disabled=mode!=='manual'||!s;const state=$(id+'-state');state.textContent=!s?'Control MQTT no configurado':mode!=='manual'?'Solo disponible en modo manual':'Suelta el control para enviar el ángulo';if(s){if(Number.isFinite(s.min))input.min=s.min;if(Number.isFinite(s.max)&&s.max>s.min)input.max=s.max;}}}
+  function csrf(){return document.cookie.split('; ').find(x=>x.startsWith('csrftoken='))?.split('=')[1]||''}
+  async function command(sensor,value){if(!sensor||!sensor.control)return false;const url=root.dataset.commandUrlTemplate.replace(/\/0\/command\//,`/${sensor.id}/command/`);try{const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':decodeURIComponent(csrf())},body:JSON.stringify({value})});return response.ok;}catch(e){console.error('MQTT command error',e);return false}}
+  document.querySelectorAll('[data-mode-choice]').forEach(b=>b.addEventListener('click',async()=>{const s=find('mode',true);if(!s)return;const target=b.dataset.modeChoice;const ok=await command(s,target==='automatic'?1:0);$('solar-mode-message').textContent=ok?'Comando publicado; esperando confirmación del dispositivo…':'No se pudo enviar el comando de modo.';}));
+  for(const [id,key] of [['solar-servo-horizontal','servo'],['solar-servo-vertical','servo2']]){const input=$(id),value=$(id+'-value');input.addEventListener('input',()=>value.textContent=input.value+'°');input.addEventListener('change',async()=>{if(currentMode!=='manual')return;const ok=await command(find(key,true),Number(input.value));$(id+'-state').textContent=ok?'Comando publicado (sin confirmación física)':'No se pudo enviar el comando';});}
+  setMode(null);drawLdr();
+  async function poll(){try{const response=await fetch(API,{cache:'no-store',headers:{'X-Requested-With':'XMLHttpRequest'}});if(!response.ok)throw Error('HTTP '+response.status);const data=await response.json();const now=new Date(data.server_time).getTime();statuses(data.devices||[],now);for(const s of data.sensors||[]){const r=registry.find(r=>r.id===s.id);if(!r||s.value===null)continue;const value=Number(s.value);if(!Number.isFinite(value))continue;for(const [key,names] of Object.entries(aliases)){if(names.includes(r.key)){values[key]=value;if(chartKeys.includes(key)&&s.timestamp&&timestamps[s.id]!==s.timestamp){timestamps[s.id]=s.timestamp;const arr=points[key];arr.push({x:new Date(s.timestamp).getTime(),y:value});arr.sort((a,b)=>a.x-b.x);if(arr.length>50)arr.splice(0,arr.length-50);}}}}renderPosition();drawLdr();const modeSensor=find('mode');setMode(modeSensor&&Number.isFinite(values.mode)?modeValue(values.mode):null);}catch(err){console.warn('Solar dashboard poll:',err);$('solar-position-state').textContent='Sin conexión con Django';}}
+  poll();setInterval(poll,2500);
 })();
