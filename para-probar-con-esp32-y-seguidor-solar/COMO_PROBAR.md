@@ -28,6 +28,15 @@ ESP32 real (`mode`, `servo`, `servo2`).
 
 Se crea solo al ejecutar `python manage.py migrate` (rol Global, acceso a todo y a `/admin/`).
 
+Si el login dice "Usuario o contraseña incorrectos" (por ejemplo, porque la base de datos ya
+tenía un `admin` con otra contraseña), dentro de `backend/` ejecuta:
+
+```bash
+python manage.py asegurar_admin
+```
+
+Con Docker: `docker compose exec web python manage.py asegurar_admin`.
+
 ## Cómo correrlo (SQLite, sin Docker)
 
 Dentro de `backend/`:

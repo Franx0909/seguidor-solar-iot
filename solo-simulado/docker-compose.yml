@@ -37,7 +37,7 @@ services:
     environment:
       POSTGRES_HOST: db
       MQTT_BROKER_HOST: mosquitto
-    command: sh -c "python manage.py migrate --noinput && (python manage.py createsuperuser --noinput || true)"
+    command: sh -c "python manage.py migrate --noinput && python manage.py asegurar_admin"
     depends_on:
       db:
         condition: service_healthy
