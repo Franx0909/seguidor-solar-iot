@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% load static l10n %}
+{% block title %}Seguidor Solar IoT - {{ block.super }}{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <h1>☀️ Seguidor Solar IoT</h1>
+    <p>
+      Sistema de seguimiento solar automático.
+      Monitoreo en tiempo real de luminosidad,
+      posición solar y servomotores.
+    </p>
+  </div>
+
+  <a class="btn" href="{% url 'monitoring:device-create' %}">
+    + Agregar dispositivo
+  </a>
+</div>
+
+<section class="solar-overview" aria-label="Resumen del sistema solar">
+  <div class="solar-overview-panel">
+    <h2>Estado de conexión</h2>
+    <p class="solar-hint">Señal basada en la última comunicación recibida, no en una prueba directa de red.</p>
+    <div class="solar-device-statuses">
+      <div class="solar-status-item" data-solar-device="esp32"><span class="solar-status-led" aria-hidden="true"></span><div><strong>ESP32</strong><small data-solar-status-label>Sin datos</small></div></div>
+      <div class="solar-status-item" data-solar-device="plc"><span class="solar-status-led" aria-hidden="true"></span><div><strong>PLC</strong><small data-solar-status-label>No configurado</small></div></div>
+      <div class="solar-status-item" data-solar-device="raspberry"><span class="solar-status-led" aria-hidden="true"></span><div><strong>Raspberry Pi</strong><small data-solar-status-label>No configurada</small></div></div>
+    </div>
+  </div>
+  <div class="solar-overview-panel">
+    <h2>Zona y hora</h2>
+    <dl class="solar-location-info">
+      <div><dt>Zona de referencia</dt><dd>Santiago, Chile</dd></div>
+      <div><dt>Fecha</dt><dd id="solar-local-date">--/--/----</dd></div>
+      <div><dt>Hora local</dt><dd id="solar-local-time">--:--:--</dd></div>
+    </dl>
+    <p class="solar-hint">Zona de referencia configurada en el prototipo, no ubicación GPS en vivo.</p>
+  </div>
+</section>
+
+{{ seed_data|json_script:"seed-data" }}
+
+<div id="dashboard-root" class="solar-dashboard" data-api-url="{% url 'monitoring:api-latest' %}" data-command-url-template="{% url 'monitoring:sensor-command' 0 %}">
+  <div id="solar-sensor-registry" hidden>
+    {% for device in devices %}{% for sensor in device.sensors.all %}{% if sensor.is_active %}
+    {% with widget=sensor.get_widget %}
+    <span data-sensor-id="{{ sensor.id }}" data-variable="{{ sensor.variable }}" data-device-slug="{{ device.slug }}" data-is-control="{% if widget.is_control %}1{% else %}0{% endif %}" data-min="{{ widget.min_value }}" data-max="{{ widget.max_value }}"></span>
+    {% endwith %}{% endif %}{% endfor %}{% endfor %}
+  </div>
+  <section class="solar-panel" aria-label="Variables de proceso en tiempo real">
+    <div class="solar-panel-heading"><div><span class="solar-eyebrow">VARIABLES DE PROCESO</span><h2>Lecturas en tiempo real por equipo</h2></div><span class="solar-live-chip">Actualiza cada 2,5 s</span></div>
+    <div class="live-device-grid">
+      {% for device in devices %}
+      <div class="live-device{% if device.slug == 'plc' %} live-device-plc{% endif %}">
+        <h3>{{ device.name }} <small>{{ device.slug }}</small></h3>
+        <div class="live-cards">
+          {% for sensor in device.sensors.all %}{% if sensor.is_active %}
+          <div class="live-card">
+            <span>{{ sensor.variable }}</span>
+            <strong data-live-sensor="{{ sensor.id }}">--</strong>
+            <small>{{ sensor.unit }}</small>
+          </div>
+          {% endif %}{% empty %}
+          <p class="solar-hint">Sin sensores aún.</p>
+          {% endfor %}
+        </div>
+      </div>
+      {% empty %}
+      <p class="solar-hint">No hay dispositivos activos. Ejecuta <code>python manage.py simular_seguidor</code> para simular el sistema completo.</p>
+      {% endfor %}
+    </div>
+  </section>
+  <section class="solar-workspace" aria-label="Posición solar y luminosidad">
+    <div class="solar-panel solar-sky-panel">
+      <div class="solar-panel-heading"><div><span class="solar-eyebrow">POSICIÓN SOLAR</span><h2>Esfera celeste</h2></div><span class="solar-live-chip" id="solar-position-state">Esperando datos</span></div>
+      <p class="solar-hint">Visualización espacial de la dirección del Sol. Arrastra para girar la vista; la posición se actualiza con las mediciones.</p>
+      <div class="solar-sphere-scene" id="solar-scene" aria-label="Esfera 3D con la posición del Sol">
+        <div class="solar-sphere" id="solar-sphere">
+          <div class="solar-sphere-equator"></div><div class="solar-sphere-meridian"></div><div class="solar-sphere-meridian solar-sphere-meridian-2"></div>
+          <div class="solar-sphere-horizon"></div><div class="solar-sphere-axis"></div>
+        </div>
+        <div class="solar-sun" id="solar-sun" hidden>☀</div>
+        <span class="solar-direction solar-north">N</span><span class="solar-direction solar-south">S</span><span class="solar-direction solar-east">E</span><span class="solar-direction solar-west">O</span>
+      </div>
+      <div class="solar-sphere-help">↔ Arrastra para rotar · Esfera interactiva</div>
+      <div class="solar-angle-cards">
+        <div><span>Azimut solar</span><strong id="solar-azimuth">--°</strong><small>0° N · 90° E · 180° S · 270° O</small></div>
+        <div><span>Elevación solar</span><strong id="solar-elevation">--°</strong><small id="solar-zenith-label">Cenit: --°</small></div>
+      </div>
+    </div>
+    <div class="solar-panel solar-light-panel">
+      <div class="solar-panel-heading"><div><span class="solar-eyebrow">SENSORES LDR</span><h2>Luminosidad en el tiempo</h2></div><span class="solar-live-chip" id="solar-light-state">Esperando datos</span></div>
+      <p class="solar-hint">Activa o desactiva sensores para comparar sus lecturas. Las horas corresponden a Santiago.</p>
+      <div class="solar-ldr-filters">
+        <label><input type="checkbox" data-ldr-filter="light_left" checked><i style="--ldr-color:#ee86a7"></i> Izquierda</label>
+        <label><input type="checkbox" data-ldr-filter="light_right" checked><i style="--ldr-color:#6aa9e8"></i> Derecha</label>
+        <label><input type="checkbox" data-ldr-filter="light_up" checked><i style="--ldr-color:#55ba9b"></i> Arriba</label>
+        <label><input type="checkbox" data-ldr-filter="light_down" checked><i style="--ldr-color:#e6ad52"></i> Abajo</label>
+      </div>
+      <div class="solar-ldr-chart-wrap"><canvas id="solar-ldr-chart" role="img" aria-label="Histórico de luminosidad de cuatro sensores LDR"></canvas></div>
+      <p class="solar-hint" id="solar-ldr-message">Buscando historial de los cuatro LDR…</p>
+      <div class="solar-ldr-latest" id="solar-ldr-latest"></div>
+    </div>
+  </section>
+  <section class="solar-panel solar-control-panel" aria-label="Control de servomotores">
+    <div class="solar-panel-heading"><div><span class="solar-eyebrow">SEGUIMIENTO</span><h2>Control del Seguidor Solar</h2></div><div class="solar-mode-selector"><button type="button" class="solar-mode-button" data-mode-choice="manual" aria-pressed="false">Manual</button><button type="button" class="solar-mode-button" data-mode-choice="automatic" aria-pressed="false">Automático</button></div></div>
+    <p class="solar-hint" id="solar-mode-message">Esperando el modo reportado por el dispositivo. Los comandos solo se habilitan si existen controles configurados.</p>
+    <div id="solar-manual-panel" hidden>
+      <div class="solar-servo-grid">
+        <div class="solar-servo-control"><label for="solar-servo-horizontal">Servo horizontal <strong id="solar-servo-horizontal-value">--°</strong></label><input id="solar-servo-horizontal" type="range" min="0" max="180" step="1" value="90" disabled><small id="solar-servo-horizontal-state">Control no disponible</small></div>
+        <div class="solar-servo-control"><label for="solar-servo-vertical">Servo vertical <strong id="solar-servo-vertical-value">--°</strong></label><input id="solar-servo-vertical" type="range" min="0" max="180" step="1" value="90" disabled><small id="solar-servo-vertical-state">Control no disponible</small></div>
+      </div>
+    </div>
+    <div id="solar-automatic-panel" hidden><div class="solar-auto-grid"><div><span>Servo horizontal</span><strong id="solar-auto-servo-h">--°</strong></div><div><span>Servo vertical</span><strong id="solar-auto-servo-v">--°</strong></div><div><span>Azimut solar</span><strong id="solar-auto-azimuth">--°</strong></div><div><span>Elevación solar</span><strong id="solar-auto-elevation">--°</strong></div></div></div>
+    <div id="solar-mode-unavailable" class="solar-empty-note">El dispositivo aún no informa si está en modo manual o automático.</div>
+  </section>
+  <p class="solar-hint">Los controles de administración, usuarios y dispositivos originales siguen disponibles en la plataforma.</p>
+</div>
+<script src="{% static 'monitoring/js/dashboard.js' %}"></script>
+{% endblock %}

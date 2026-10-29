@@ -115,22 +115,12 @@ services:
     env_file: .env
     environment:
       POSTGRES_HOST: db
-    command: python manage.py simular_seguidor
+    command: python manage.py simular_seguidor --esp32-real
     depends_on:
       db:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-
-  simulator:
-    build: ./simulator
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      MQTT_BROKER_HOST: mosquitto
-    depends_on:
-      mosquitto:
-        condition: service_healthy
 
 volumes:
   postgres_data:
