@@ -5,11 +5,15 @@ corto. Los 4 LDR de la ESP32 leen esa luz según hacia dónde apunta el panel,
 la ESP32 corrige sus servos para igualar los LDR (seguimiento real en lazo
 cerrado), el PLC informa ángulos, motores y energía generada, y la Raspberry
 Pi actúa como gateway. Todo se guarda en la BD igual que si llegara por MQTT.
+
+Con --esp32-real (seguidor real conectado) solo se simula el PLC, que toma
+los ángulos de los servos y los LDR de las lecturas reales de la ESP32.
 """
 
 import math
 import random
 import time
+from datetime import timedelta
 
 from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand
@@ -17,11 +21,13 @@ from django.utils import timezone
 
 from monitoring.models import Device, Sensor, SensorReading, Widget
 
+ESP32_SLUG = "seguidor-solar-iot"
+REAL_MAX_AGE = timedelta(seconds=15)  # misma ventana que el indicador "Datos recientes"
 SIM_TAG = "simulado"  # sensor_command guarda los comandos de estos dispositivos en la BD en vez de MQTT
 
 # slug -> (nombre, {variable: (unidad, widget, min, max)})
 DEVICES = {
-    "seguidor-solar-iot": (
+    ESP32_SLUG: (
         "ESP32 Seguidor Solar (simulado)",
         {
             "light_left": ("", Widget.TYPE_LINE_CHART, 0, 4095),
@@ -118,19 +124,39 @@ def toward(current, target):
     return current + max(-MAX_STEP, min(MAX_STEP, target - current))
 
 
+def real_esp32_state():
+    """Últimos valores de la ESP32 real, o None si no ha enviado datos en los últimos 15 s."""
+    device = Device.objects.filter(slug=ESP32_SLUG).first()
+    if device is None or device.last_seen_at is None or timezone.now() - device.last_seen_at > REAL_MAX_AGE:
+        return None
+    return {s.variable: s.readings.values_list("value", flat=True).first() for s in device.sensors.all()}
+
+
+def light_from_ldr(ldr):
+    """(sol 0..1, apuntamiento 0..1) estimados desde los LDR: si están parejos, el panel apunta a la luz."""
+    avg = sum(ldr.values()) / 4
+    if avg <= 0:
+        return 0.0, 0.0
+    imbalance = abs(ldr["light_left"] - ldr["light_right"]) + abs(ldr["light_up"] - ldr["light_down"])
+    return min(1.0, avg / LDR_MAX), max(0.0, 1 - imbalance / (2 * avg))
+
+
 class Command(BaseCommand):
-    help = "Simula ESP32 + PLC + Raspberry Pi siguiendo una luz imaginaria que se mueve por el cielo."
+    help = (
+        "Simula ESP32 + PLC + Raspberry Pi siguiendo una luz imaginaria. "
+        "Con --esp32-real solo simula el PLC, a partir de los datos de la ESP32 real."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument("--interval", type=float, default=1.0, help="Segundos entre lecturas.")
         parser.add_argument("--ciclo", type=float, default=180.0, help="Segundos que dura un 'día' completo.")
         parser.add_argument(
-            "--sin-esp32",
+            "--esp32-real",
             action="store_true",
-            help="No simular la ESP32 (usar con el seguidor real conectado); se simulan PLC y Raspberry.",
+            help="Seguidor real conectado: solo se simula el PLC, que lee ángulos y LDR de la ESP32 real.",
         )
 
-    def handle(self, *args, interval, ciclo, sin_esp32, **options):
+    def handle(self, *args, interval, ciclo, esp32_real, **options):
         owner = User.objects.filter(is_superuser=True).order_by("id").first()
         if owner is None:
             self.stderr.write("Crea primero un superusuario: python manage.py createsuperuser")
@@ -138,7 +164,7 @@ class Command(BaseCommand):
 
         sensors = {}
         for slug, (name, variables) in DEVICES.items():
-            if sin_esp32 and slug == "seguidor-solar-iot":
+            if esp32_real and slug != "plc":
                 continue
             device, _ = Device.objects.get_or_create(slug=slug, defaults={"name": name, "owner": owner, "tag": SIM_TAG})
             for variable, (unit, widget_type, vmin, vmax) in variables.items():
@@ -154,9 +180,14 @@ class Command(BaseCommand):
         if mode_sensor and not mode_sensor.readings.exists():
             SensorReading.objects.create(sensor=mode_sensor, value=1, timestamp=timezone.now())
 
-        self.stdout.write(self.style.SUCCESS(
-            f"Simulación activa: luz imaginaria con ciclo de {ciclo:.0f}s, lecturas cada {interval}s. Ctrl+C para detener."
-        ))
+        if esp32_real:
+            self.stdout.write(self.style.SUCCESS(
+                f"Solo PLC simulado, leyendo la ESP32 real '{ESP32_SLUG}' cada {interval}s. Ctrl+C para detener."
+            ))
+        else:
+            self.stdout.write(self.style.SUCCESS(
+                f"Simulación activa: luz imaginaria con ciclo de {ciclo:.0f}s, lecturas cada {interval}s. Ctrl+C para detener."
+            ))
 
         servo_az, servo_zen = 0.0, 0.0
         energy_wh, forwarded = 0.0, 0
@@ -164,34 +195,42 @@ class Command(BaseCommand):
         try:
             while True:
                 now = timezone.now()
-                sun_track, sun_el = light_position(time.monotonic() - start, ciclo)
-                ldr = ldr_readings(sun_track, sun_el, servo_az, servo_zen)
-
                 prev_az, prev_zen = servo_az, servo_zen
-                auto = True
-                if mode_sensor:
-                    last = lambda var: sensors[var].readings.values_list("value", flat=True).first()
-                    auto = last("mode") != 0
-                    if not auto:  # modo manual: los servos van al ángulo pedido desde el dashboard
-                        servo_az = toward(servo_az, last("servo") if last("servo") is not None else servo_az)
-                        servo_zen = toward(servo_zen, last("servo2") if last("servo2") is not None else servo_zen)
-                if auto:
-                    servo_az, servo_zen = track(ldr, servo_az, servo_zen)
+                esp32_values = {}
+                if esp32_real:
+                    real = real_esp32_state()
+                    if real is None:  # ESP32 sin datos recientes: el PLC informa motores detenidos y sin generación
+                        sunlight, pointing = 0.0, 0.0
+                    else:
+                        servo_az = real["azimuth"] if real.get("azimuth") is not None else servo_az
+                        servo_zen = real["zenith"] if real.get("zenith") is not None else servo_zen
+                        ldr = {k: real.get(k) or 0 for k in ("light_left", "light_right", "light_up", "light_down")}
+                        sunlight, pointing = light_from_ldr(ldr)
+                else:
+                    sun_track, sun_el = light_position(time.monotonic() - start, ciclo)
+                    ldr = ldr_readings(sun_track, sun_el, servo_az, servo_zen)
+                    servo_az, servo_zen = self._move_servos(ldr, servo_az, servo_zen, mode_sensor, sensors)
+                    if sun_el > 0:
+                        sunlight = math.sin(math.radians(sun_el))
+                        error = math.hypot(sun_track - servo_az, sun_el - (90 - servo_zen))
+                        pointing = math.cos(math.radians(min(90, error)))
+                    else:
+                        sunlight, pointing = 0.0, 0.0
+                    esp32_values = {
+                        **ldr,
+                        "azimuth": servo_az,
+                        "zenith": servo_zen,
+                        "solar_azimuth": compass_azimuth(sun_track),
+                        "solar_elevation": sun_el,
+                    }
 
-                panel_el = 90 - servo_zen
-                pointing = math.cos(math.radians(min(90, math.hypot(sun_track - servo_az, sun_el - panel_el))))
-                sunlight = max(0.0, math.sin(math.radians(sun_el)))
-                voltage = 36.5 * min(1, 4 * sunlight) * pointing if sun_el > 0 else 0.0
-                current = 8.2 * sunlight * pointing if sun_el > 0 else 0.0
+                voltage = 36.5 * min(1, 4 * sunlight) * pointing
+                current = 8.2 * sunlight * pointing
                 power = voltage * current
                 energy_wh += power * interval / 3600
 
                 values = {
-                    **ldr,
-                    "azimuth": servo_az,
-                    "zenith": servo_zen,
-                    "solar_azimuth": compass_azimuth(sun_track),
-                    "solar_elevation": sun_el,
+                    **esp32_values,
                     "plc_inclinacion": servo_zen,
                     "plc_azimut_panel": compass_azimuth(servo_az),
                     "plc_motor_azimut": float(abs(servo_az - prev_az) > 0.1),
@@ -216,3 +255,16 @@ class Command(BaseCommand):
                 time.sleep(interval)
         except KeyboardInterrupt:
             self.stdout.write("Simulación detenida.")
+
+    @staticmethod
+    def _move_servos(ldr, servo_az, servo_zen, mode_sensor, sensors):
+        """ESP32 simulada: en automático sigue la luz; en manual va al ángulo pedido desde el dashboard."""
+        if mode_sensor:
+            last = lambda var: sensors[var].readings.values_list("value", flat=True).first()
+            if last("mode") == 0:
+                target_az, target_zen = last("servo"), last("servo2")
+                return (
+                    toward(servo_az, servo_az if target_az is None else target_az),
+                    toward(servo_zen, servo_zen if target_zen is None else target_zen),
+                )
+        return track(ldr, servo_az, servo_zen)

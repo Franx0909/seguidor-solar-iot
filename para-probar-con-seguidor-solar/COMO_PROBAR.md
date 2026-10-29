@@ -23,7 +23,14 @@ Los tres aparecen en verde en "Estado de conexión" y todas sus variables se ven
 - Al volver a **Automático**, el seguidor vuelve a buscar la luz.
 
 Opciones: `--ciclo 60` (día más rápido), `--interval 2` (lecturas cada 2 s),
-`--sin-esp32` (no simula la ESP32, para usar el seguidor real).
+`--esp32-real` (seguidor real conectado: solo se simula el PLC, ver abajo).
+
+## Dos formas de probar
+
+| Modo | Comando | ESP32 | PLC | Raspberry |
+|---|---|---|---|---|
+| Todo simulado (sin hardware) | `python manage.py simular_seguidor` | simulada | simulado | simulada |
+| Con el seguidor real | `python manage.py simular_seguidor --esp32-real` | **real** | simulado a partir de la ESP32 real | no se simula |
 
 ## Cómo correrlo (sin Docker, SQLite)
 
@@ -55,10 +62,21 @@ El servicio `simulacion_seguidor` arranca solo.
 
 ## Con el seguidor solar real (ESP32)
 
-1. Registrar la ESP32 en **Dispositivos → Agregar** con slug `seguidor-solar-iot` y copiar el
+1. Usar una base de datos sin la ESP32 simulada (si antes corriste el modo "todo simulado",
+   borra `backend/db.sqlite3` y vuelve a hacer `migrate` y `createsuperuser`).
+2. Registrar la ESP32 en **Dispositivos → Agregar** con slug `seguidor-solar-iot` y copiar el
    token al firmware.
-2. Correr el broker MQTT y `python manage.py run_mqtt_listener` (con `MQTT_BROKER_HOST=localhost`).
-3. Correr `python manage.py simular_seguidor --sin-esp32` para que el PLC y la Raspberry sigan
-   simulados mientras la ESP32 envía datos reales.
+3. Correr el broker MQTT, `python manage.py run_mqtt_listener` (con `MQTT_BROKER_HOST=localhost`)
+   y `python puente_esp32.py` si la ESP32 publica en los topics `lina/esp32/...`.
+4. Correr `python manage.py simular_seguidor --esp32-real`.
+
+El PLC simulado lee en cada ciclo los servos (`azimuth`, `zenith`) y los 4 LDR de la ESP32 real:
+- inclinación y azimut del panel = ángulos reales de los servos;
+- motores encendidos cuando los servos reales se mueven;
+- voltaje/corriente/potencia según cuánta luz ven los LDR y qué tan parejos están (panel bien
+  apuntado = más potencia).
+
+Si la ESP32 deja de enviar datos por más de 15 s, el PLC informa motores detenidos y 0 W.
+Los botones Manual/Automático y los sliders envían los comandos por MQTT a la ESP32 real.
 
 No levantar esta carpeta y la versión original al mismo tiempo: ambas usan los puertos 8000 y 1883.
