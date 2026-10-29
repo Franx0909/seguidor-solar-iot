@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Entrar - {{ block.super }}{% endblock %}
+{% block content %}
+<div class="login-box">
+    <img src="{% if effective_logo_url %}{{ effective_logo_url }}{% else %}{% static 'monitoring/img/solar-logo.svg' %}{% endif %}" alt="Logo Seguidor Solar IoT" class="login-logo-img">
+    <h1>Seguidor Solar IoT</h1>
+    <p>Inicia sesión para ver el panel en tiempo real.</p>
+    {% if form.errors %}
+        <p class="error">Usuario o contraseña incorrectos.</p>
+    {% endif %}
+    <form method="post">
+        {% csrf_token %}
+        <label for="id_username">Usuario</label>
+        {{ form.username }}
+        <label for="id_password">Contraseña</label>
+        {{ form.password }}
+        <input type="hidden" name="next" value="{{ next }}">
+        <button type="submit">Entrar</button>
+    </form>
+</div>
+{% endblock %}

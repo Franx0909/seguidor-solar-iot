@@ -1,0 +1,48 @@
+# Environment / secrets
+.env
+mosquitto/config/passwd
+firmware/**/config.h
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Django
+backend/staticfiles/
+backend/media/
+*.sqlite3
+backend/db.sqlite3
+
+# Docker
+docker-compose.override.yml
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Credenciales y configuraciones privadas
+.env
+.env.*
+!.env.example
+
+# Mosquitto: usuarios y contraseñas
+mosquitto/config/passwd
+mosquitto/config/passwd.*
+mosquitto/config/*.key
+
+# Archivos temporales de pruebas
+probar_esp32.py
+run_mqtt_listener.py
+
+# Archivos locales de Arduino
+secrets.h
+credentials.h
