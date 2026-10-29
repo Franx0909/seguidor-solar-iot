@@ -109,13 +109,13 @@ services:
         - action: rebuild
           path: ./backend/requirements.txt
 
-  plc_simulator:
+  simulacion_seguidor:
     build: ./backend
     restart: unless-stopped
     env_file: .env
     environment:
       POSTGRES_HOST: db
-    command: python manage.py simulate_plc
+    command: python manage.py simular_seguidor
     depends_on:
       db:
         condition: service_healthy

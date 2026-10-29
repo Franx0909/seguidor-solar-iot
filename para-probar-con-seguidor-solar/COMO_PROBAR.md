@@ -1,16 +1,31 @@
-# Seguidor Solar IoT — versión con PLC simulado
+# Seguidor Solar IoT — para probar con el seguidor solar
 
-Esta carpeta es una versión aparte del proyecto con:
+Versión del proyecto con simulación completa del sistema, dashboard solar con logo propio y
+control de usuarios.
 
-- **PLC simulado** (`backend/monitoring/management/commands/simulate_plc.py`): genera cada 2 s
-  inclinación, azimut, estado de motores, voltaje, corriente, potencia y temperatura del panel
-  según la hora de Chile, y los guarda en la BD como dispositivo `plc`.
-- **Dashboard solar** con logo propio (`static/monitoring/img/solar-logo.svg`) y tarjetas en vivo
-  de todos los equipos (ESP32, PLC, Raspberry).
-- **Control de usuarios**: login/logout de Django, `@login_required` en todas las vistas, roles
-  Global/Administrador/Operador. Base de datos: SQLite3 en local, PostgreSQL con Docker.
+## Qué simula `python manage.py simular_seguidor`
 
-## Opción A: sin Docker (SQLite)
+Una **luz imaginaria** (el "sol") recorre el cielo de Este a Oeste pasando por el Norte (como en
+Chile) en un ciclo de 3 minutos: 2 min 24 s de "día" y 36 s de "noche".
+
+| Equipo | Slug | Qué hace en la simulación |
+|---|---|---|
+| ESP32 | `seguidor-solar-iot` | 4 LDR leen la luz según hacia dónde apunta el panel; los servos (`azimuth`, `zenith`) giran hacia el LDR más iluminado (seguimiento en lazo cerrado). De noche vuelve al Este. |
+| PLC | `plc` | Inclinación y azimut del panel, motores encendidos/apagados, voltaje, corriente, potencia y temperatura del panel. |
+| Raspberry Pi | `raspberry` | Gateway: temperatura y uso de CPU, energía generada acumulada (Wh) y lecturas reenviadas. |
+
+Los tres aparecen en verde en "Estado de conexión" y todas sus variables se ven en tiempo real.
+
+**Variables ejecutadas (control):** en el dashboard, en "Control del Seguidor Solar":
+- **Manual / Automático** cambia el modo.
+- En **Manual**, los sliders de servo horizontal y vertical mueven el panel al ángulo pedido
+  (el PLC muestra el motor encendido mientras se mueve).
+- Al volver a **Automático**, el seguidor vuelve a buscar la luz.
+
+Opciones: `--ciclo 60` (día más rápido), `--interval 2` (lecturas cada 2 s),
+`--sin-esp32` (no simula la ESP32, para usar el seguidor real).
+
+## Cómo correrlo (sin Docker, SQLite)
 
 Dentro de `backend/`:
 
@@ -20,29 +35,30 @@ python manage.py migrate
 python manage.py createsuperuser
 ```
 
-Luego, en 3 terminales (también dentro de `backend/`):
+Luego, en 2 terminales dentro de `backend/`:
 
 ```bash
-python manage.py runserver 0.0.0.0:8000
-python manage.py simulate_plc
-python manage.py run_mqtt_listener   # requiere un broker Mosquitto; definir MQTT_BROKER_HOST=localhost
+python manage.py runserver
+python manage.py simular_seguidor
 ```
 
-Abrir http://localhost:8000 e iniciar sesión.
+Abrir http://localhost:8000 e iniciar sesión con el superusuario.
 
-## Opción B: con Docker
+## Con Docker
 
 ```bash
 cp .env.example .env    # completar contraseñas
 docker compose up --build
 ```
 
-El servicio `plc_simulator` arranca solo.
+El servicio `simulacion_seguidor` arranca solo.
 
-## Conectar el seguidor solar real (ESP32)
+## Con el seguidor solar real (ESP32)
 
-1. En **Dispositivos → Agregar**, registrar la ESP32 con slug `seguidor-solar-iot`.
-2. Copiar el token generado al firmware (`firmware/esp32_ecs_iot/config.h`).
-3. Apuntar la ESP32 al broker MQTT (IP de este PC en la red, puerto 1883).
+1. Registrar la ESP32 en **Dispositivos → Agregar** con slug `seguidor-solar-iot` y copiar el
+   token al firmware.
+2. Correr el broker MQTT y `python manage.py run_mqtt_listener` (con `MQTT_BROKER_HOST=localhost`).
+3. Correr `python manage.py simular_seguidor --sin-esp32` para que el PLC y la Raspberry sigan
+   simulados mientras la ESP32 envía datos reales.
 
 No levantar esta carpeta y la versión original al mismo tiempo: ambas usan los puertos 8000 y 1883.
