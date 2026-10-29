@@ -20,6 +20,14 @@ Si la ESP32 deja de enviar datos por más de 15 s, el PLC informa motores deteni
 Los botones Manual/Automático y los sliders del dashboard envían los comandos por MQTT a la
 ESP32 real (`mode`, `servo`, `servo2`).
 
+## Credenciales
+
+| Usuario | Contraseña |
+|---|---|
+| `admin` | `1234` |
+
+Se crea solo al ejecutar `python manage.py migrate` (rol Global, acceso a todo y a `/admin/`).
+
 ## Cómo correrlo (SQLite, sin Docker)
 
 Dentro de `backend/`:
@@ -27,7 +35,6 @@ Dentro de `backend/`:
 ```bash
 pip install -r requirements.txt
 python manage.py migrate
-python manage.py createsuperuser
 python manage.py runserver 0.0.0.0:8000
 ```
 
@@ -47,7 +54,7 @@ En el dashboard, ESP32 y PLC deben aparecer en verde en "Estado de conexión".
 ## Con Docker
 
 ```bash
-cp .env.example .env    # completar contraseñas
+cp .env.example .env    # ya trae admin / 1234
 docker compose up --build
 ```
 

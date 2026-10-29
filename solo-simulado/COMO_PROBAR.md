@@ -24,6 +24,14 @@ Los tres aparecen en verde en "Estado de conexión" y todas sus variables se ven
 
 Opciones: `--ciclo 60` (día más rápido), `--interval 2` (lecturas cada 2 s).
 
+## Credenciales
+
+| Usuario | Contraseña |
+|---|---|
+| `admin` | `1234` |
+
+Se crea solo al ejecutar `python manage.py migrate` (rol Global, acceso a todo y a `/admin/`).
+
 ## Cómo correrlo (SQLite, sin Docker)
 
 Dentro de `backend/`:
@@ -31,7 +39,6 @@ Dentro de `backend/`:
 ```bash
 pip install -r requirements.txt
 python manage.py migrate
-python manage.py createsuperuser
 ```
 
 Luego, en 2 terminales dentro de `backend/`:
@@ -41,12 +48,12 @@ python manage.py runserver
 python manage.py simular_seguidor
 ```
 
-Abrir http://localhost:8000 e iniciar sesión con el superusuario.
+Abrir http://localhost:8000 e iniciar sesión con `admin` / `1234`.
 
 ## Con Docker
 
 ```bash
-cp .env.example .env    # completar contraseñas
+cp .env.example .env    # ya trae admin / 1234
 docker compose up --build
 ```
 
