@@ -27,7 +27,9 @@ memoria) para aparecer conectada.
 - motores encendidos cuando los servos reales se mueven;
 - voltaje, corriente y potencia según cuánta luz ven los LDR y qué tan parejos están.
 
-Si la ESP32 deja de enviar datos por más de 15 s, el PLC informa motores detenidos y 0 W.
+Si la ESP32 deja de enviar datos por más de 15 s, el PLC simulado también deja de reportar y
+aparece desconectado (en rojo) al mismo tiempo que ella; vuelve solo cuando la ESP32 envía
+datos de nuevo.
 
 ## Credenciales
 

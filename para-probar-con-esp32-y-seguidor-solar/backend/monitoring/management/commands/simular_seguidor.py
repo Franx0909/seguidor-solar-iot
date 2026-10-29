@@ -7,7 +7,8 @@ cerrado), el PLC informa ángulos, motores y energía generada, y la Raspberry
 Pi actúa como gateway. Todo se guarda en la BD igual que si llegara por MQTT.
 
 Con --esp32-real (seguidor real conectado) solo se simula el PLC, que toma
-los ángulos de los servos y los LDR de las lecturas reales de la ESP32.
+los ángulos de los servos y los LDR de las lecturas reales de la ESP32; si
+la ESP32 no envía datos, el PLC tampoco reporta.
 """
 
 import math
@@ -125,11 +126,12 @@ def toward(current, target):
 
 
 def real_esp32_state():
-    """Últimos valores de la ESP32 real, o None si no ha enviado datos en los últimos 15 s."""
+    """(últimos valores, última conexión) de la ESP32 real, o None si no ha enviado datos en los últimos 15 s."""
     device = Device.objects.filter(slug=ESP32_SLUG).first()
     if device is None or device.last_seen_at is None or timezone.now() - device.last_seen_at > REAL_MAX_AGE:
         return None
-    return {s.variable: s.readings.values_list("value", flat=True).first() for s in device.sensors.all()}
+    values = {s.variable: s.readings.values_list("value", flat=True).first() for s in device.sensors.all()}
+    return values, device.last_seen_at
 
 
 def light_from_ldr(ldr):
@@ -197,15 +199,18 @@ class Command(BaseCommand):
                 now = timezone.now()
                 prev_az, prev_zen = servo_az, servo_zen
                 esp32_values = {}
+                seen_at = now
                 if esp32_real:
-                    real = real_esp32_state()
-                    if real is None:  # ESP32 sin datos recientes: el PLC informa motores detenidos y sin generación
-                        sunlight, pointing = 0.0, 0.0
-                    else:
-                        servo_az = real["azimuth"] if real.get("azimuth") is not None else servo_az
-                        servo_zen = real["zenith"] if real.get("zenith") is not None else servo_zen
-                        ldr = {k: real.get(k) or 0 for k in ("light_left", "light_right", "light_up", "light_down")}
-                        sunlight, pointing = light_from_ldr(ldr)
+                    state = real_esp32_state()
+                    if state is None:  # sin ESP32 el PLC tampoco reporta, así aparece desconectado en el dashboard
+                        time.sleep(interval)
+                        continue
+                    # el PLC toma la última conexión de la ESP32 para pasar a rojo al mismo tiempo que ella
+                    real, seen_at = state
+                    servo_az = real["azimuth"] if real.get("azimuth") is not None else servo_az
+                    servo_zen = real["zenith"] if real.get("zenith") is not None else servo_zen
+                    ldr = {k: real.get(k) or 0 for k in ("light_left", "light_right", "light_up", "light_down")}
+                    sunlight, pointing = light_from_ldr(ldr)
                 else:
                     sun_track, sun_el = light_position(time.monotonic() - start, ciclo)
                     ldr = ldr_readings(sun_track, sun_el, servo_az, servo_zen)
@@ -251,7 +256,7 @@ class Command(BaseCommand):
                 ]
                 SensorReading.objects.bulk_create(readings)
                 forwarded += len(readings)
-                Device.objects.filter(pk__in={r.sensor.device_id for r in readings}).update(last_seen_at=now)
+                Device.objects.filter(pk__in={r.sensor.device_id for r in readings}).update(last_seen_at=seen_at)
                 time.sleep(interval)
         except KeyboardInterrupt:
             self.stdout.write("Simulación detenida.")
