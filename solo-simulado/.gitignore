@@ -41,7 +41,6 @@ mosquitto/config/*.key
 
 # Archivos temporales de pruebas
 probar_esp32.py
-run_mqtt_listener.py
 
 # Archivos locales de Arduino
 secrets.h
