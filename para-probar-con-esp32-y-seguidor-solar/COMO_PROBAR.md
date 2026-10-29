@@ -22,10 +22,13 @@ derecha, arriba, abajo, servos, posición solar), los reenvía a la plataforma c
 ESP32 y cada 5 s publica su propio estado (mensajes reenviados, temperatura y uso de CPU, uso de
 memoria) para aparecer conectada.
 
-**PLC simulado:** en cada ciclo lee los servos (`azimuth`, `zenith`) y los 4 LDR de la ESP32:
-- inclinación y azimut del panel = ángulos reales de los servos;
+**PLC simulado:** como es una maqueta (sin panel que genere energía), el PLC solo trabaja con
+lo que mide la ESP32. En cada ciclo lee los servos (`azimuth`, `zenith`) y los 4 LDR:
+- inclinación y azimut del seguidor = ángulos reales de los servos;
 - motores encendidos cuando los servos reales se mueven;
-- voltaje, corriente y potencia según cuánta luz ven los LDR y qué tan parejos están.
+- luz promedio de los 4 LDR;
+- error horizontal (derecha − izquierda) y error vertical (arriba − abajo);
+- alineado = 1 cuando ambos errores son menores a 40, es decir, el seguidor apunta a la luz.
 
 Si la ESP32 deja de enviar datos por más de 15 s, el PLC simulado también deja de reportar y
 aparece desconectado (en rojo) al mismo tiempo que ella; vuelve solo cuando la ESP32 envía

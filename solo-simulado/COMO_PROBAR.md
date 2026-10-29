@@ -11,8 +11,8 @@ Chile) en un ciclo de 3 minutos: 2 min 24 s de "día" y 36 s de "noche".
 | Equipo | Slug | Qué hace en la simulación |
 |---|---|---|
 | ESP32 | `seguidor-solar-iot` | 4 LDR leen la luz según hacia dónde apunta el panel; los servos (`azimuth`, `zenith`) giran hacia el LDR más iluminado (seguimiento en lazo cerrado). De noche vuelve al Este. |
-| PLC | `plc` | Inclinación y azimut del panel, motores encendidos/apagados, voltaje, corriente, potencia y temperatura del panel. |
-| Raspberry Pi | `raspberry` | Gateway: temperatura y uso de CPU, energía generada acumulada (Wh) y lecturas reenviadas. |
+| PLC | `plc` | Inclinación y azimut del seguidor, motores encendidos/apagados, luz promedio de los LDR, error horizontal (derecha − izquierda), error vertical (arriba − abajo) y si está alineado con la luz. |
+| Raspberry Pi | `raspberry` | Gateway: temperatura y uso de CPU y lecturas reenviadas. |
 
 Los tres aparecen en verde en "Estado de conexión" y todas sus variables se ven en tiempo real.
 

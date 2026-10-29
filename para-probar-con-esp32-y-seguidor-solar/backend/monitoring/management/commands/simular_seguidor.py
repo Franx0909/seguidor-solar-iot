@@ -3,7 +3,7 @@
 Una luz imaginaria (el "sol") recorre el cielo de Este a Oeste en un ciclo
 corto. Los 4 LDR de la ESP32 leen esa luz según hacia dónde apunta el panel,
 la ESP32 corrige sus servos para igualar los LDR (seguimiento real en lazo
-cerrado), el PLC informa ángulos, motores y energía generada, y la Raspberry
+cerrado), el PLC informa ángulos, motores y el balance de los LDR, y la Raspberry
 Pi actúa como gateway. Todo se guarda en la BD igual que si llegara por MQTT.
 
 Con --esp32-real (seguidor real conectado) solo se simula el PLC, que toma
@@ -51,10 +51,10 @@ DEVICES = {
             "plc_azimut_panel": ("°", Widget.TYPE_METER, 0, 360),
             "plc_motor_azimut": ("", Widget.TYPE_LED, 0, 1),
             "plc_motor_elevacion": ("", Widget.TYPE_LED, 0, 1),
-            "plc_voltaje_panel": ("V", Widget.TYPE_LINE_CHART, 0, 40),
-            "plc_corriente_panel": ("A", Widget.TYPE_LINE_CHART, 0, 10),
-            "plc_potencia": ("W", Widget.TYPE_LINE_CHART, 0, 350),
-            "plc_temperatura_panel": ("°C", Widget.TYPE_NUMERIC, 0, 80),
+            "plc_luz_promedio": ("", Widget.TYPE_LINE_CHART, 0, 4095),
+            "plc_error_horizontal": ("", Widget.TYPE_NUMERIC, -4095, 4095),
+            "plc_error_vertical": ("", Widget.TYPE_NUMERIC, -4095, 4095),
+            "plc_alineado": ("", Widget.TYPE_LED, 0, 1),
         },
     ),
     "raspberry": (
@@ -62,7 +62,6 @@ DEVICES = {
         {
             "rpi_temp_cpu": ("°C", Widget.TYPE_NUMERIC, 0, 90),
             "rpi_uso_cpu": ("%", Widget.TYPE_METER, 0, 100),
-            "rpi_energia_generada": ("Wh", Widget.TYPE_NUMERIC, 0, 10000),
             "rpi_lecturas_reenviadas": ("", Widget.TYPE_NUMERIC, 0, 1e9),
         },
     ),
@@ -134,13 +133,16 @@ def real_esp32_state():
     return values, device.last_seen_at
 
 
-def light_from_ldr(ldr):
-    """(sol 0..1, apuntamiento 0..1) estimados desde los LDR: si están parejos, el panel apunta a la luz."""
-    avg = sum(ldr.values()) / 4
-    if avg <= 0:
-        return 0.0, 0.0
-    imbalance = abs(ldr["light_left"] - ldr["light_right"]) + abs(ldr["light_up"] - ldr["light_down"])
-    return min(1.0, avg / LDR_MAX), max(0.0, 1 - imbalance / (2 * avg))
+def plc_from_ldr(ldr):
+    """Lo que el PLC calcula de los 4 LDR: luz promedio, error de cada eje y si el seguidor está alineado."""
+    err_h = ldr["light_right"] - ldr["light_left"]
+    err_v = ldr["light_up"] - ldr["light_down"]
+    return {
+        "plc_luz_promedio": sum(ldr.values()) / 4,
+        "plc_error_horizontal": err_h,
+        "plc_error_vertical": err_v,
+        "plc_alineado": float(abs(err_h) < TRACK_DEADBAND and abs(err_v) < TRACK_DEADBAND),
+    }
 
 
 class Command(BaseCommand):
@@ -169,6 +171,8 @@ class Command(BaseCommand):
             if esp32_real and slug != "plc":
                 continue
             device, _ = Device.objects.get_or_create(slug=slug, defaults={"name": name, "owner": owner, "tag": SIM_TAG})
+            # variables de versiones anteriores (ej. voltaje/potencia del panel) dejan de mostrarse
+            Sensor.objects.filter(device=device).exclude(variable__in=variables).update(is_active=False)
             for variable, (unit, widget_type, vmin, vmax) in variables.items():
                 sensor, created = Sensor.objects.get_or_create(device=device, variable=variable, defaults={"unit": unit})
                 if created:
@@ -192,7 +196,7 @@ class Command(BaseCommand):
             ))
 
         servo_az, servo_zen = 0.0, 0.0
-        energy_wh, forwarded = 0.0, 0
+        forwarded = 0
         start = time.monotonic()
         try:
             while True:
@@ -210,17 +214,10 @@ class Command(BaseCommand):
                     servo_az = real["azimuth"] if real.get("azimuth") is not None else servo_az
                     servo_zen = real["zenith"] if real.get("zenith") is not None else servo_zen
                     ldr = {k: real.get(k) or 0 for k in ("light_left", "light_right", "light_up", "light_down")}
-                    sunlight, pointing = light_from_ldr(ldr)
                 else:
                     sun_track, sun_el = light_position(time.monotonic() - start, ciclo)
                     ldr = ldr_readings(sun_track, sun_el, servo_az, servo_zen)
                     servo_az, servo_zen = self._move_servos(ldr, servo_az, servo_zen, mode_sensor, sensors)
-                    if sun_el > 0:
-                        sunlight = math.sin(math.radians(sun_el))
-                        error = math.hypot(sun_track - servo_az, sun_el - (90 - servo_zen))
-                        pointing = math.cos(math.radians(min(90, error)))
-                    else:
-                        sunlight, pointing = 0.0, 0.0
                     esp32_values = {
                         **ldr,
                         "azimuth": servo_az,
@@ -229,24 +226,15 @@ class Command(BaseCommand):
                         "solar_elevation": sun_el,
                     }
 
-                voltage = 36.5 * min(1, 4 * sunlight) * pointing
-                current = 8.2 * sunlight * pointing
-                power = voltage * current
-                energy_wh += power * interval / 3600
-
                 values = {
                     **esp32_values,
                     "plc_inclinacion": servo_zen,
                     "plc_azimut_panel": compass_azimuth(servo_az),
                     "plc_motor_azimut": float(abs(servo_az - prev_az) > 0.1),
                     "plc_motor_elevacion": float(abs(servo_zen - prev_zen) > 0.1),
-                    "plc_voltaje_panel": voltage,
-                    "plc_corriente_panel": current,
-                    "plc_potencia": power,
-                    "plc_temperatura_panel": 18 + 30 * sunlight + random.uniform(-0.3, 0.3),
+                    **plc_from_ldr(ldr),
                     "rpi_temp_cpu": 47 + random.uniform(-2, 2),
                     "rpi_uso_cpu": random.uniform(12, 30),
-                    "rpi_energia_generada": energy_wh,
                     "rpi_lecturas_reenviadas": forwarded,
                 }
                 readings = [
