@@ -1,11 +1,12 @@
 # Seguidor Solar IoT — para probar con la ESP32 y el seguidor solar
 
-La **ESP32 y el seguidor son reales**; solo el **PLC se simula**, a partir de los datos que
-envía la ESP32. Para probar sin hardware usa la carpeta `solo-simulado`.
+La **ESP32, el seguidor y la Raspberry Pi son reales**; solo el **PLC se simula**, a partir de
+los datos que envía la ESP32. Para probar sin hardware usa la carpeta `solo-simulado`.
 
 | Equipo | Origen |
 |---|---|
 | ESP32 (`seguidor-solar-iot`) | **real**, por MQTT |
+| Raspberry Pi (`raspberry`) | **real**, con `raspberry/publicar_estado.py` |
 | PLC (`plc`) | simulado con `python manage.py simular_seguidor --esp32-real` |
 
 ## Qué hace el PLC simulado
@@ -59,6 +60,28 @@ python manage.py simular_seguidor --esp32-real
 ```
 
 En el dashboard, ESP32 y PLC deben aparecer en verde en "Estado de conexión".
+
+## Conectar la Raspberry Pi
+
+La Raspberry publica su estado (temperatura y uso de CPU, uso de memoria y horas encendida)
+por MQTT, igual que la ESP32, para aparecer en verde en "Estado de conexión".
+
+1. En el dashboard, **Dispositivos → Agregar**, registrar la Raspberry con ID `raspberry`
+   y copiar su token.
+2. Copiar `raspberry/publicar_estado.py` a la Raspberry e instalar la librería:
+
+```bash
+pip install paho-mqtt==1.6.1
+```
+
+3. Ejecutarlo en la Raspberry (IP del PC donde corre Mosquitto; usuario y contraseña MQTT del `.env`):
+
+```bash
+MQTT_BROKER_HOST=192.168.1.50 MQTT_USERNAME=ecs MQTT_PASSWORD=la-del-env RASPBERRY_TOKEN=el-token python3 publicar_estado.py
+```
+
+Si el servidor (Django y Mosquitto) corre en la misma Raspberry, usar `MQTT_BROKER_HOST=localhost`.
+Con los tres conectados, ESP32, PLC y Raspberry Pi aparecen en verde.
 
 ## Con Docker
 
