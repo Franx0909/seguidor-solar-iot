@@ -69,22 +69,6 @@ services:
         - action: rebuild
           path: ./backend/requirements.txt
 
-  puente_esp32:
-    build: ./backend
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      POSTGRES_HOST: db
-      MQTT_BROKER_HOST: mosquitto
-    command: python puente_esp32.py
-    depends_on:
-      db:
-        condition: service_healthy
-      mosquitto:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-
   mqtt_listener:
     build: ./backend
     restart: unless-stopped

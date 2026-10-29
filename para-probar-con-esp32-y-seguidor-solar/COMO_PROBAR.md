@@ -3,23 +3,31 @@
 La **ESP32, el seguidor y la Raspberry Pi son reales**; solo el **PLC se simula**, a partir de
 los datos que envía la ESP32. Para probar sin hardware usa la carpeta `solo-simulado`.
 
+```
+ESP32 --(lina/esp32/...)--> Mosquitto --> Raspberry Pi (puente) --(ecs/seguidor-solar-iot/...)--> Mosquitto --> Django
+                                                       \--(ecs/raspberry/... estado propio)
+PLC simulado (simular_seguidor --esp32-real) lee de la base de datos los datos de la ESP32
+```
+
 | Equipo | Origen |
 |---|---|
-| ESP32 (`seguidor-solar-iot`) | **real**, por MQTT |
-| Raspberry Pi (`raspberry`) | **real**, con `raspberry/publicar_estado.py` |
+| ESP32 (`seguidor-solar-iot`) | **real**, publica en `lina/esp32/...` |
+| Raspberry Pi (`raspberry`) | **real**, es el puente: `raspberry/puente_raspberry.py` |
 | PLC (`plc`) | simulado con `python manage.py simular_seguidor --esp32-real` |
 
-## Qué hace el PLC simulado
+## Qué hace cada parte
 
-En cada ciclo lee los servos (`azimuth`, `zenith`) y los 4 LDR de la ESP32 real:
+**Raspberry Pi (puente):** escucha los topics `lina/esp32/...` de la ESP32 (LDR izquierda,
+derecha, arriba, abajo, servos, posición solar), los reenvía a la plataforma con el token de la
+ESP32 y cada 5 s publica su propio estado (mensajes reenviados, temperatura y uso de CPU, uso de
+memoria) para aparecer conectada.
+
+**PLC simulado:** en cada ciclo lee los servos (`azimuth`, `zenith`) y los 4 LDR de la ESP32:
 - inclinación y azimut del panel = ángulos reales de los servos;
 - motores encendidos cuando los servos reales se mueven;
-- voltaje, corriente y potencia según cuánta luz ven los LDR y qué tan parejos están
-  (panel bien apuntado = más potencia).
+- voltaje, corriente y potencia según cuánta luz ven los LDR y qué tan parejos están.
 
 Si la ESP32 deja de enviar datos por más de 15 s, el PLC informa motores detenidos y 0 W.
-Los botones Manual/Automático y los sliders del dashboard envían los comandos por MQTT a la
-ESP32 real (`mode`, `servo`, `servo2`).
 
 ## Credenciales
 
@@ -28,19 +36,21 @@ ESP32 real (`mode`, `servo`, `servo2`).
 | `admin` | `1234` |
 
 Se crea solo al ejecutar `python manage.py migrate` (rol Global, acceso a todo y a `/admin/`).
+Si el login dice "Usuario o contraseña incorrectos", dentro de `backend/` ejecuta
+`python manage.py asegurar_admin` (con Docker: `docker compose exec web python manage.py asegurar_admin`).
 
-Si el login dice "Usuario o contraseña incorrectos" (por ejemplo, porque la base de datos ya
-tenía un `admin` con otra contraseña), dentro de `backend/` ejecuta:
+## 1. Levantar la plataforma en el PC
+
+Con Docker (incluye Mosquitto):
 
 ```bash
-python manage.py asegurar_admin
+cp .env.example .env    # ya trae admin / 1234 y el usuario/contraseña MQTT
+docker compose up --build
 ```
 
-Con Docker: `docker compose exec web python manage.py asegurar_admin`.
+El servicio `simulacion_seguidor` arranca el PLC simulado con `--esp32-real`.
 
-## Cómo correrlo (SQLite, sin Docker)
-
-Dentro de `backend/`:
+Sin Docker (necesitas un Mosquitto instalado con el usuario/contraseña del `.env`), dentro de `backend/`:
 
 ```bash
 pip install -r requirements.txt
@@ -48,49 +58,44 @@ python manage.py migrate
 python manage.py runserver 0.0.0.0:8000
 ```
 
-1. Entrar a http://localhost:8000, ir a **Dispositivos → Agregar** y registrar la ESP32 con
-   slug `seguidor-solar-iot`. Copiar el token generado al firmware.
-2. Tener corriendo el broker Mosquitto y apuntar la ESP32 a la IP de este PC (puerto 1883).
-3. En otras terminales dentro de `backend/` (con `MQTT_BROKER_HOST=localhost`):
+y en otras terminales dentro de `backend/` (con `MQTT_BROKER_HOST=localhost`):
 
 ```bash
 python manage.py run_mqtt_listener
-python puente_esp32.py              # solo si la ESP32 publica en los topics lina/esp32/...
 python manage.py simular_seguidor --esp32-real
 ```
 
-En el dashboard, ESP32 y PLC deben aparecer en verde en "Estado de conexión".
+## 2. Registrar los equipos en el dashboard
 
-## Conectar la Raspberry Pi
+Entrar a http://localhost:8000 con `admin` / `1234`, ir a **Dispositivos → Agregar** y crear:
 
-La Raspberry publica su estado (temperatura y uso de CPU, uso de memoria y horas encendida)
-por MQTT, igual que la ESP32, para aparecer en verde en "Estado de conexión".
+| ID del dispositivo | Para qué |
+|---|---|
+| `seguidor-solar-iot` | ESP32: copiar su token (lo usa el puente) |
+| `raspberry` | Raspberry Pi: copiar su token |
 
-1. En el dashboard, **Dispositivos → Agregar**, registrar la Raspberry con ID `raspberry`
-   y copiar su token.
-2. Copiar `raspberry/publicar_estado.py` a la Raspberry e instalar la librería:
+## 3. ESP32
+
+Apuntarla al Mosquitto del PC (IP del PC, puerto 1883, usuario/contraseña MQTT del `.env`).
+Debe publicar en `lina/esp32/light/left`, `lina/esp32/light/right`, `lina/esp32/light/up`,
+`lina/esp32/light/down`, `lina/esp32/azimuth`, `lina/esp32/zenith`, etc., con el valor como
+número en texto plano (ej. `2345`).
+
+## 4. Raspberry Pi (puente)
+
+Copiar `raspberry/puente_raspberry.py` a la Raspberry e instalar la librería:
 
 ```bash
 pip install paho-mqtt==1.6.1
 ```
 
-3. Ejecutarlo en la Raspberry (IP del PC donde corre Mosquitto; usuario y contraseña MQTT del `.env`):
+Ejecutarlo con la IP del PC, el usuario/contraseña MQTT del `.env` y los dos tokens del paso 2:
 
 ```bash
-MQTT_BROKER_HOST=192.168.1.50 MQTT_USERNAME=ecs MQTT_PASSWORD=la-del-env RASPBERRY_TOKEN=el-token python3 publicar_estado.py
+MQTT_BROKER_HOST=192.168.1.50 MQTT_USERNAME=ecs MQTT_PASSWORD=la-del-env ESP32_TOKEN=token-esp32 RASPBERRY_TOKEN=token-raspberry python3 puente_raspberry.py
 ```
 
-Si el servidor (Django y Mosquitto) corre en la misma Raspberry, usar `MQTT_BROKER_HOST=localhost`.
-Con los tres conectados, ESP32, PLC y Raspberry Pi aparecen en verde.
-
-## Con Docker
-
-```bash
-cp .env.example .env    # ya trae admin / 1234
-docker compose up --build
-```
-
-El servicio `simulacion_seguidor` arranca el PLC simulado con `--esp32-real`. Registrar la ESP32
-en el dashboard (paso 1) y apuntarla al broker del PC.
+En el dashboard, **ESP32, PLC y Raspberry Pi** deben aparecer en verde y los LDR de izquierda,
+derecha, arriba y abajo en el gráfico.
 
 No levantar esta carpeta y `solo-simulado` al mismo tiempo: ambas usan los puertos 8000 y 1883.
